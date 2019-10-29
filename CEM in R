@@ -1,0 +1,427 @@
+
+library(readr)
+library(readxl)
+library(reshape2)
+library(dplyr)
+library(tidyverse)
+library(MatchIt)
+library(cem)
+library(Zelig)
+
+library(pacman)
+library(knitr)
+library(splitstackshape)
+library(lubridate)
+library(zoo)
+library(tidyr)
+
+#edit Pawel. intstalling 2 different packages to import SAS files;
+library(sas7bdat)
+library(haven)
+
+library(bit64)
+
+pacman::p_load(knitr, wakefield, MatchIt, tableone, captioner)
+
+
+setwd("Y:/2019 RADS/CEM Using R/1. Reruning final SAS table/Data")
+
+#edit Pawel - installing packages recomended by Michael for Data import from vertica
+library(DBI)
+library(RSQLite)
+library(RODBC)
+library(odbc)
+library(dbConnect)
+
+
+con <- dbConnect(odbc::odbc(), "Vertica-SharecareBI", username = "Pawel.Brocki", pwd = "Didbbn8v8bSDfdnc!")
+
+
+
+#remove memory limits so data import works
+memory.size(max = TRUE)
+
+#memory.limit(size = 4095)
+
+
+#1.get medclaims aggregation in R
+
+BCBSNE_medclaims = dbGetQuery(con, "
+
+
+
+select distinct  a.Guid, k.med_costs_2019, j.med_costs_2018, i.med_costs_2017, h.med_costs_2016, g.med_costs_2015, f.med_costs_2014, e.med_costs_2013, d.med_costs_2012, c.med_costs_2011, b.med_costs_2010
+from scp.data_hub_elig a
+
+
+left join (select   Guid, sum (PaidAmt) med_costs_2019
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2019-01-01'
+and dateServiceFrom < '2020-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as k
+on  a.guid=k.guid
+
+left join (select   Guid, sum (PaidAmt) med_costs_2018
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2018-01-01'
+and dateServiceFrom < '2019-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as j
+on  a.guid=j.guid
+
+left join (select  Guid,  sum (PaidAmt) med_costs_2017
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2017-01-01'
+and dateServiceFrom < '2018-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as i
+on  a.guid=i.guid
+
+
+left join (select  Guid,  sum (PaidAmt) med_costs_2016
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2016-01-01'
+and dateServiceFrom < '2017-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as h
+on  a.guid=h.guid
+
+
+left join (select  Guid,   sum (PaidAmt) med_costs_2015
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2015-01-01'
+and dateServiceFrom < '2016-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as g
+on  a.guid=g.guid
+
+
+left join (select  Guid,   sum (PaidAmt) med_costs_2014
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2014-01-01'
+and dateServiceFrom < '2015-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as f
+on  a.guid=f.guid
+
+
+left join (select  Guid,  sum (PaidAmt) med_costs_2013
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2013-01-01'
+and dateServiceFrom < '2014-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as e
+on  a.guid=e.guid
+
+left join (select   Guid,   sum (PaidAmt) med_costs_2012
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2012-01-01'
+and dateServiceFrom < '2013-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as d
+on  a.guid=d.guid
+
+left join (select  Guid,   sum (PaidAmt) med_costs_2011
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2011-01-01'
+and dateServiceFrom < '2012-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as c
+on  a.guid=c.guid
+
+
+left join (select  Guid,   sum (PaidAmt) med_costs_2010
+from scp.data_hub_medclaims
+where dateServiceFrom >= '2010-01-01'
+and dateServiceFrom < '2011-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid,  memberUniqueId) as b
+on  a.guid=b.guid
+
+where a.customerID like '%HP_BCBSNE%'")
+
+
+
+#2.get RX medclaims
+
+
+BCBSNE_RXclaims_aggregated = dbGetQuery(con, "
+select distinct  a.Guid,  k.rx_costs_2019, j.rx_costs_2018, i.rx_costs_2017, h.rx_costs_2016, g.rx_costs_2015, f.rx_costs_2014, e.rx_costs_2013, d.rx_costs_2012, c.rx_costs_2011, b.rx_costs_2010
+from scp.data_hub_elig a
+
+
+left join (select   Guid,  
+sum (PaidAmt) rx_costs_2019
+from scp.data_hub_rxclaims
+where dateFilled >= '2019-01-01'
+and dateFilled < '2020-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as k
+on a.guid=k.guid
+
+
+left join (select   Guid,  
+sum (PaidAmt) rx_costs_2018
+from scp.data_hub_rxclaims
+where dateFilled >= '2018-01-01'
+and dateFilled < '2019-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as j
+on a.guid=j.guid
+
+left join (select  Guid,  sum (PaidAmt) rx_costs_2017
+from scp.data_hub_rxclaims
+where dateFilled >= '2017-01-01'
+and dateFilled < '2018-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as i
+on a.guid=i.guid
+
+left join (select  Guid,  sum (PaidAmt) rx_costs_2016
+from scp.data_hub_rxclaims
+where dateFilled >= '2016-01-01'
+and dateFilled < '2017-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as h
+on  a.guid=h.guid
+
+
+left join (select  Guid,  sum (PaidAmt) rx_costs_2015
+from scp.data_hub_rxclaims
+where dateFilled >= '2015-01-01'
+and dateFilled < '2016-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as g
+on  a.guid=g.guid
+
+left join (select  Guid,   sum (PaidAmt) rx_costs_2014
+from scp.data_hub_rxclaims
+where dateFilled >= '2014-01-01'
+and dateFilled < '2015-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as f
+on a.guid=f.guid
+
+
+left join (select  Guid,sum (PaidAmt) rx_costs_2013
+from scp.data_hub_rxclaims
+where dateFilled >= '2013-01-01'
+and dateFilled < '2014-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as e
+on a.guid=e.guid
+
+
+left join (select   Guid,  sum (PaidAmt) rx_costs_2012
+from scp.data_hub_rxclaims
+where dateFilled >= '2012-01-01'
+and dateFilled < '2013-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as d
+on  a.guid=d.guid
+
+
+left join (select  Guid,  sum (PaidAmt) rx_costs_2011
+from scp.data_hub_rxclaims
+where dateFilled >= '2011-01-01'
+and dateFilled < '2012-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as c
+on a.guid=c.guid
+
+
+left join (select  Guid,  sum (PaidAmt) rx_costs_2010
+from scp.data_hub_rxclaims
+where dateFilled >= '2010-01-01'
+and dateFilled < '2011-01-01'
+and customerID like '%HP_BCBSNE%'
+group by Guid) as b
+on  a.guid=b.guid
+
+where a.customerID like '%HP_BCBSNE%'")
+summary(BCBSNE_RXclaims_aggregated)
+
+#3.get RX medication adhernece variables
+
+
+BCBSNE_Asthma_control_Rx = dbGetQuery(con, "select * 
+  from data_science.BCBSNE_Asthma_control_Rx")
+summary(BCBSNE_Asthma_control_Rx)
+
+
+
+#4.get eligibility
+
+#4a. import nomal eligibility file
+#import direct from Vertica
+
+
+BCBSNE_eligibility =dbGetQuery(con, "
+select distinct Guid, customerId, memberUniqueId, RelationshipCode, Dob, Gender, MaritalStatus, EligibilityStartDate, EligibilityEndDate, BenefitStatusCode, PlanCategory, PlanType, LnVendorDateFirstSeen, LnVendorDateLastSeen, CreateDtUtc
+from scp.data_hub_elig
+where customerId like '%HP_BCBSNE%'")
+
+
+
+
+
+
+#5 import condition history 
+#Potential issue: min create date 2017-11-13, max create date 2019-09-05
+#import direct from Vertica
+
+
+BCBSNE_condition_history = dbGetQuery(con, "select * 
+  from sc_reporting.scp_member_condition_history
+where guid in (select guid   
+               from scp.data_hub_elig
+               where customerId like '%HP_BCBSNE%')")
+
+
+
+#6 import call history 
+#min call date 2000-06-13, max call date 2019-09-07
+
+BCBSNE_calls = dbGetQuery(con, "select * 
+from data_science.BCBSNE_calls")
+summary(BCBSNE_calls)
+
+
+
+#############################
+## Data Manipulation
+#############################
+
+#limit popolation by Guid
+#if limited by Guid, DOB and Gender N=447,081
+#if limited by Guid only N=446,162
+#but need to retain DOB, thefore wil retaim most current record DOB
+#N=3,144,110
+Match.Population <- BCBSNE_eligibility[,c(1,5:6, 15)]
+
+
+#Retain only the most recent date for every Guid in a data frame
+#from https://stackoverflow.com/questions/30058708/retain-only-the-most-recent-date-for-every-id-in-a-data-frame
+#N=446,162 (the same amount as unique Guids)
+
+Match.Population_2 <- Match.Population %>% 
+  group_by(Guid) %>%
+  slice(which.max(as.Date(CreateDtUtc, '%m/%d/%Y')))
+
+#create new Gender variable where 02 is M and 03 is Female
+Match.Population_2$Gender2 <- ifelse(Match.Population_2$Gender=="02","M","F")
+
+#drop old gender variable
+Match.Population_2 <- Match.Population_2[,c(1:2,4:5)]
+#rename Gender2 to Gender
+colnames(Match.Population_2) <- c("Guid", "Dob", "CreateDtUtc", "Gender")
+
+
+#Calulate age as of Base Period 2014/01/01'
+
+#First make sure that Dob is a datefomat
+Match.Population_2$Dob <- as.Date(Match.Population_2$Dob, "%Y/%m/%d")
+#calulate age as of January 1st 2014
+Match.Population_2$age <- round(as.numeric(difftime("2014/01/01", Match.Population_2$Dob, unit='weeks'))/52.25) 
+
+#create cloumn for age bands with a dummy variable
+Match.Population_2$AgeBand <- "AgeBand"
+#nested ifelse function to create AgeBands from 0-9 up to 100+
+Match.Population_2$AgeBand <- ifelse(Match.Population_2$age <10,"0-9",ifelse(Match.Population_2$age > 9 & Match.Population_2$age <= 19,"10-19",ifelse(Match.Population_2$age > 19 & Match.Population_2$age <= 29,"20-29", ifelse(Match.Population_2$age > 29 & Match.Population_2$age <= 39,"30-39", ifelse(Match.Population_2$age > 39 & Match.Population_2$age <= 49,"40-49", ifelse(Match.Population_2$age > 49 & Match.Population_2$age <= 59,"50-59",ifelse(Match.Population_2$age > 59 & Match.Population_2$age <= 69,"60-69",ifelse(Match.Population_2$age > 69 & Match.Population_2$age <= 79,"70-79",ifelse(Match.Population_2$age > 79 & Match.Population_2$age <= 89,"80-89",ifelse(Match.Population_2$age > 89 & Match.Population_2$age <= 99,"90-99","+100"))))))))))
+
+  
+
+# Medical claims: left Join program participants and medical claims
+Match.Population_3 <- left_join(Match.Population_2, BCBSNE_medclaims_aggregated, by = "Guid")
+
+# Rx claims: left Join program participants and Rx claims
+Match.Population_4 <- left_join(Match.Population_3, BCBSNE_RXclaims_aggregated, by = "Guid")
+
+# Asthma medication adherence variable
+# 1st remove unecessary colums so only the 0/1 flag is left
+BCBSNE_Asthma_control_Rx_2 <- BCBSNE_Asthma_control_Rx[,c(1, 7:11)]
+#left join on matching population
+Match.Population_5 <- left_join(Match.Population_4, BCBSNE_Asthma_control_Rx_2, by = "Guid")
+
+
+
+
+
+
+#Disease ID
+
+#unique disease fields
+match.unique_diease_fields <- unique(BCBSNE_condition_history[,c('DIAGNOSIS','CREATED_BY' )])
+#Heart Failure is 
+#"Heart Failure" created by "Data Migration" 
+#	[Default]HF Manual Add by "morrisonk"
+#"[Default]HF ID Real Age"by	"morrisonk"
+#"Heart Failure" by "COACH-827"
+#"[Default]HF Manual Add" by "blankev"
+#"[Default]HF Manual Add" by "dicristofarok"
+#"[Default]HF Manual Add" by "merlenbacht"
+
+#frequencies
+BCBSNE_condition_count<-BCBSNE_condition_history %>%
+  distinct()%>%
+  count (DIAGNOSIS, CREATED_BY)
+
+#focus only on the data migration conditions
+BCBSNE_condition_history_2 <- subset(BCBSNE_condition_history, CREATED_BY=="DataMigration" & STATUS==1) 
+
+
+#imiting conditions to conditions in "Core5" list
+Core5 <- c("Heart Failure", "Coronary Artery Disease", "Chronic Obstructive Pulmonary Disease", "Diabetes", "Asthma")
+BCBSNE_condition_history_3 <- subset(BCBSNE_condition_history_2, DIAGNOSIS %in% Core5)
+
+
+BCBSNE_condition_history_4 <- dcast(transform(BCBSNE_condition_history_3, count = 1), GUID~DIAGNOSIS, fill = 0)
+
+#rename column names so they have no spacing
+colnames(BCBSNE_condition_history_4) <- c("Guid", "Asthma", "COPD", "CAD", "Diabetes", "HF")
+
+BCBSNE_condition_history_4$Core5_count <- BCBSNE_condition_history_4$Asthma + BCBSNE_condition_history_4$COPD + BCBSNE_condition_history_4$CAD + BCBSNE_condition_history_4$Diabetes + BCBSNE_condition_history_4$HF;
+
+###########################################
+#continue here on   wedenday September 18th
+#merge admission count with population table
+# work on admission count by year
+#work on call count by year
+#limit superoutliers & capping of costs
+#rework medclaims and RX table in R?
+
+######################################
+### CEM GERAL
+######################################
+
+Matching_results <- matchit(Participated ~ GENDER + age_group +  base_admit_group + condition_count + Diabetes + HF + CAD + COPD + Asthma + Base_2014_Pers_Asthma_Rx_Covd, data = combine_5_wrx,  method="cem")
+
+Matching_results_summary <- summary(Matching_results)
+
+Matching_table <- match.data(Matching_results)
+
+
+
+
+
+#### Treatment and Control
+CEM.Group.Treatment <- subset(Matching_table, Participated == 1)
+
+
+CEM.Group.Control   <- subset(Matching_table, Participated == 0)
+
+
+
+Treatment.Program_2017 <- mean(CEM.Group.Treatment$Yr_2017_Total_Costs_capped * CEM.Group.Treatment$weights)
+Treatment.Base_2014    <- mean(CEM.Group.Treatment$Base_2014_Total_Costs_capped * CEM.Group.Treatment$weights)
+
+Control.Program_2017 <- mean(CEM.Group.Control$Yr_2017_Total_Costs_capped * CEM.Group.Control$weights)
+Control.Base_2014     <- mean(CEM.Group.Control$Base_2014_Total_Costs_capped * CEM.Group.Control$weights)
+
+
+
+CEM.Gross.Savings <- (Treatment.Program_2017 - Treatment.Base_2014) - (Control.Program_2017 - Control.Base_2014)
+
+
+
