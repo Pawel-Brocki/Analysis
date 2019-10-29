@@ -1,0 +1,317 @@
+--DROP TABLE data_science.Std_mean_2018_costs
+--DROP TABLE data_science.Summary_2018_costs
+
+/*create temporary costs table for
+1. DRG
+2. HCPCS
+3. CPT 
+4. summary table
+5. Mean, Stdev, 3stdev table
+*/
+
+create temporary table 
+--if not exists 
+data_science.DRG_costs_4cust (Guid int, costs numeric)
+on commit preserve Rows;
+
+
+create temporary table 
+--if not exists 
+data_science.HCPCS_costs_4cust (Guid int, costs numeric)
+on commit preserve Rows;
+
+
+create temporary table 
+--if not exists 
+data_science.CPT_costs_4Cust (Guid int, costs numeric)
+on commit preserve Rows;
+
+
+--drop table data_science.Summary_18_19_costs_4cust
+create temporary table 
+--if not exists 
+data_science.Summary_18_19_costs_4cust (Guid int, DRG_Costs numeric, CPT_Costs numeric, HCPCS_Costs numeric, total_costs_18_19 numeric, total_costs_18_19_capped numeric)
+on commit preserve Rows;
+
+create temporary table 
+--if not exists 
+data_science.Std_mean_18_19_costs_4cust ( average numeric, STDDEV numeric, AVG_3_Mean numeric)
+on commit preserve Rows;
+
+
+
+/*Insert costs into temprorary table*/
+ 
+/* 1. DRG costs */
+insert into   data_science.DRG_costs_4cust
+select distinct a.GUID, sum(b.DRG_Costs) as costs 
+from scp.data_hub_medclaims  a
+
+left join data_science.Medicare_DRGs_14_19 b
+on cast(a.DRGCode as numeric) = b.MS_DRG
+where a.DRGCode >0
+and a.dateServiceFrom >= '2018-07-01'
+and a.dateServiceFrom < '2019-07-01'
+and GUID >0
+and (a.customerID like 'HP_HIGHMARK'
+or a.customerID like 'ER_SHBP'
+or a.customerID like 'ER_BCBSMN'
+or a.customerID like 'HP_HSMA')
+--Pawel October 23rd: add SHBP, BCBSMN and HSMA here
+group by a.Guid
+
+
+
+
+/* Test DRG
+select * from data_science.DRG_costs_4cust
+*/
+
+
+/* 2. HCPCS costs */
+insert into   data_science.HCPCS_costs_4cust
+select distinct a.GUID, sum(b.average_costs) as costs 
+from scp.data_hub_medclaims a 
+
+left join data_science.Medicare_HCPCS_costs_PFS_DME b
+on a.HCPCScode = b.HCPCS
+where a.HCPCSCode is not null
+and a.dateServiceFrom >= '2018-07-01'
+and a.dateServiceFrom < '2019-07-01'
+and GUID >0
+and (a.customerID like 'HP_HIGHMARK'
+or a.customerID like 'ER_SHBP'
+or a.customerID like 'ER_BCBSMN'
+or a.customerID like 'HP_HSMA')
+--Pawel October 23rd: add SHBP, BCBSMN and HSMA here
+
+group by GUID
+
+
+/* Test HCPCS
+select * from data_science.HCPCS_costs
+*/
+
+/* 3. CPT costs */
+
+insert into  data_science.CPT_costs_4cust
+select distinct a.GUID, sum(b.average_costs) as costs 
+
+from scp.data_hub_medclaims a 
+
+left join data_science.Medicare_HCPCS_costs_PFS_DME b
+on a.CPTProcCode = b.HCPCS
+
+where a.CPTProcCode is not null
+
+--Pawel October 23rd: add SHBP, BCBSMN and HSMA here
+and a.dateServiceFrom >= '2018-01-01'
+and a.dateServiceFrom < '2019-01-01'
+and a.GUID >0
+and (a.customerID like 'HP_HIGHMARK'
+or a.customerID like 'ER_SHBP'
+or a.customerID like 'ER_BCBSMN'
+or a.customerID like 'HP_HSMA')
+
+group by a.GUID
+
+/* Test CPT
+select * from data_science.CPT_costs
+*/
+
+
+
+/* update summary table */
+
+insert into  data_science.Summary_18_19_costs_4cust
+
+select distinct guid.Guid, a.costs as DRG_Costs, b.costs as CPT_Costs, c.costs as HCPCS_Costs, (isnull(a.costs,0) + isnull(b.costs,0) + isnull(c.costs, 0)) as total_costs_18_19, (isnull(a.costs,0) + isnull(b.costs,0) + isnull(c.costs, 0)) as total_costs_18_19_capped
+
+
+from 
+--creat a list of all GUIDs in DRG, HCPCS and CPZ costs table
+(select GUID  from data_science.DRG_costs_4cust
+union all 
+select GUID  from data_science.CPT_costs_4cust
+union all
+select GUID  from data_science.HCPCS_costs_4cust) as GUID
+--left join with DRG, HCPCS and CPT  costs
+
+left join data_science.DRG_costs_4cust a
+on GUID.GUID=a.Guid
+
+left join data_science.CPT_costs_4cust b
+on GUID.GUID=b.Guid
+
+left join data_science.HCPCS_costs_4cust c
+on GUID.GUID=c.Guid
+group by GUID.Guid, a.costs, b.costs, c.costs
+
+/* Test summary table 
+select * from data_science.Summary_18_19_costs_4cust
+*/
+
+
+/*****************************************************
+******************************************************
+*****************Outlier Treatment********************
+******************************************************
+*****************************************************/
+
+
+
+
+
+
+/***************************************************************
+/* super outlier (>250k) exclusion super outliers
+*********************************************************/
+
+/* Test how many super Outliers are there?
+select * from  data_science.Summary_2018_costs where total_costs_2018 > 250000
+*/
+
+/*delete super outliers*/
+
+delete from data_science.Summary_18_19_costs_4cust
+where total_costs_18_19 > 250000
+
+/***************************************************************
+/* capping of costs
+*********************************************************/
+
+/* create avg, stddev and mean+3stdev table */
+/* insert Average and standard deviation and 3times stnadrad deviation from mean*/
+
+
+insert into  data_science.Std_mean_18_19_costs_4cust
+select avg(total_costs_18_19) as average, stddev(total_costs_18_19) as STDDEV,   (( 3*stddev(total_costs_18_19)) +avg(total_costs_18_19)  )  as AVG_3_Mean
+from data_science.Summary_18_19_costs_4cust
+
+
+
+/*
+select * from data_science.Std_mean_18_19_costs_4cust
+*/
+
+
+/****************************
+Update capped costs
+*****************************/
+
+update data_science.Summary_18_19_costs_4cust 
+set total_costs_18_19_capped = (select AVG_3_Mean from  data_science.Std_mean_18_19_costs_4cust)
+--from data_science.Summary_2018_costs 
+where  total_costs_18_19_capped > (select AVG_3_Mean from  data_science.Std_mean_18_19_costs_4cust)
+
+
+/*
+select * from data_science.Summary_2018_costs
+where total_costs_2018 >70000
+*/
+
+
+
+/***********************************
+*********Link to R/Y/G feed*********
+***********************************/
+
+--Pawel October 23rd: 
+--Create a T1-TX for RealAge or use sc_sandbox.outcomes_testcomplete_stage3 / no because only secure ID in this table
+---only uses G->G, Y->Y, R->R for analysis
+
+/*--Check R/y/G feed
+select factor_desc, min(run_date), max(run_date) 
+from RATM_SECURE.ryg_feed
+group by 1
+order by 1
+*/
+
+
+--drop table data_science.ryg_first
+--1. create first value table
+create table data_science.ryg_first as 
+
+SELECT * FROM RATM_SECURE.ryg_feed a
+WHERE a.run_date = (
+SELECT min(run_date) FROM RATM_SECURE.ryg_feed b
+WHERE a.guid = b.guid and a.fact_id=b.fact_id)
+/* 
+select * from data_science.ryg_first
+where guid=5153
+and fact_id=20396
+*/
+
+--drop table data_science.ryg_last
+--2. create last value table
+
+create table data_science.ryg_last as 
+SELECT * FROM RATM_SECURE.ryg_feed a
+
+WHERE a.run_date = (
+
+SELECT MAX(run_date) FROM RATM_SECURE.ryg_feed b
+
+WHERE a.guid = b.guid and a.fact_id=b.fact_id)
+
+
+/*
+select * from data_science.ryg_last
+where guid=5153
+and fact_id=20396
+*/
+
+--drop table data_science.ryg_first_last
+--3. combine first and last values
+--N=2,815623 as of October 25th
+create table data_science.ryg_first_last as
+select a.customer, a.guid, a.fact_id, a.factor_desc, a.factor_color as t1_fact_color, a.run_date as t1_run_date, b.factor_color as tx_fact_color, b.run_date as tx_run_date
+from  data_science.ryg_first a
+inner join data_science.ryg_last b
+on a.guid=b.guid and a.fact_id=b.fact_id
+where a.run_date <>  b.run_date
+--order by guid, fact_id
+
+
+
+/*--test table
+select * from data_science.ryg_first_last
+where guid=5153
+and fact_id=20396
+*/
+
+*/*
+select fact_id, min(t1_run_date), max(t1_run_date), min(tx_run_date), max(tx_run_date)
+from data_science.ryg_first_last
+group by 1
+order by 1
+*/
+
+--drop table data_science.ryg_first_last_constant_ryg
+--4. limit table only to G->G or Y->Y or R->R
+--N=2,669,203
+create table data_science.ryg_first_last_constant_ryg as
+select *
+from  data_science.ryg_first_last 
+where t1_fact_color = tx_fact_color
+order by guid, fact_id
+
+/*
+select * from data_science.ryg_first_last_constant_ryg
+*/
+--5.link constant RYG table to 18_19 costs 
+
+
+select  a.fact_id, a.factor_desc, a.t1_fact_color as fact_color, count(a.fact_id),  avg(isnull(b.total_costs_18_19, 0)) as total_costs_18_19 , avg(isnull(b.total_costs_18_19_capped, 0)) as total_costs_18_19_capped
+from data_science.ryg_first_last_constant_ryg  a
+inner Join data_science.Summary_18_19_costs_4cust  b
+on a.GUID=b.Guid
+where a.customer like 'HIGHMARK'
+or a.customer like 'SHBP'
+or a.customer like 'SHBP_2'
+or a.customer like 'HSMA'
+or a.customer like 'BCBSMN'
+--Pawel October 23rd: add SHBP, BCBSMN and HSMA here
+group by  a.fact_id, a.factor_desc, a.t1_fact_color
+
+
