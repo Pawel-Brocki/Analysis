@@ -39,7 +39,7 @@ library(sqldf)
 #!!!!!!!
 #Comment PAwel: Add your credentials here
 
-con <- dbConnect(odbc::odbc(), "Vertica-SharecareBI", username = "Pawel.Brocki", pwd = "Didbbbn8v8bSDfdnc!")
+con <- dbConnect(odbc::odbc(), "Vertica-SharecareBI", username = "Pawel.Brocki", pwd = "!")
 
 
 
